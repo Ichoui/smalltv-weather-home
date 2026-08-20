@@ -11,6 +11,9 @@ Le projet utilise Firebase Functions v2 et Firestore. Les conditions courantes e
 - `getHomeAssistantWeather` retourne une version JSON adaptée à une intégration météo Home Assistant, protégée par un Bearer token.
 - `getDailyWellness` retourne les données Wellness quotidiennes de deux comptes Intervals.icu, protégées par un Bearer token.
 - `resetDailyWellness` invalide le cache Wellness du jour pour un seul compte, protégée par le même token.
+- `getDailyWellnessWhoop` retourne le même contrat Wellness, alimenté directement par l'API WHOOP V2.
+- `resetDailyWellnessWhoop` invalide uniquement le cache WHOOP du jour pour un compte.
+- `whoopAuth` démarre la connexion OAuth WHOOP d'un compte; `whoopCallback` reçoit la redirection OAuth.
 
 La météo utilise explicitement le modèle Open-Meteo `best_match`.
 
@@ -210,6 +213,69 @@ La réponse confirme l'invalidation :
 ```
 
 Le reset est répétable sans erreur, ne touche jamais l'autre compte et incrémente une génération de cache. Cette génération empêche une requête commencée avant le reset de réécrire une ancienne réponse. Le prochain GET relira donc immédiatement Intervals.icu pour le compte invalidé.
+
+## Daily Wellness WHOOP direct
+
+L'intégration WHOOP fonctionne en parallèle d'Intervals.icu. Elle utilise les comptes fixes `me` et `partner`, le même fuseau `America/Toronto`, le même Bearer token `HOME_ASSISTANT_WELLNESS_ENDPOINT_TOKEN` et le même contrat JSON que `getDailyWellness`. Ses caches sont isolés dans `wellnessWhoopCache`; les tokens OAuth restent dans `whoopAccounts` et ne sont jamais renvoyés ni journalisés.
+
+Créer les deux secrets WHOOP :
+
+```bash
+firebase functions:secrets:set WHOOP_CLIENT_ID
+firebase functions:secrets:set WHOOP_CLIENT_SECRET
+```
+
+Définir aussi l'URI publique HTTPS exacte de callback dans `.env` pour le développement et dans la configuration Firebase pour le déploiement :
+
+```text
+WHOOP_REDIRECT_URI=https://<function-url>/whoopCallback
+```
+
+Dans le WHOOP Developer Dashboard, créer/configurer le client avec cette même URI de redirection, puis autoriser les scopes `read:sleep`, `read:recovery` et `offline`. `offline` est indispensable : WHOOP crée alors un refresh token, automatiquement renouvelé et remplacé par la Function. Ne copiez jamais ce token manuellement.
+
+### Connecter les comptes WHOOP
+
+Pour `me`, demander l'URL OAuth puis l'ouvrir dans un navigateur :
+
+```bash
+curl --fail --silent --show-error \
+  -H "Authorization: Bearer $HOME_ASSISTANT_WELLNESS_ENDPOINT_TOKEN" \
+  "https://<function-url>/whoopAuth?account=me"
+```
+
+Connectez-vous à WHOOP et acceptez les scopes. WHOOP redirige alors vers `whoopCallback`, qui confirme `{ "ok": true, "account": "me" }` sans exposer les tokens. Répétez exactement la même procédure avec `account=partner` et le compte WHOOP partenaire.
+
+### GET `/getDailyWellnessWhoop`
+
+```bash
+curl --fail --silent --show-error \
+  -H "Authorization: Bearer $HOME_ASSISTANT_WELLNESS_ENDPOINT_TOKEN" \
+  "https://<function-url>/getDailyWellnessWhoop"
+```
+
+La réponse a la même structure que `getDailyWellness`. WHOOP utilise le sommeil principal non-nap terminé durant le jour courant Québec et sa Recovery associée. Un score WHOOP encore en calcul donne `pending`; l'absence de sommeil du jour ou un score non calculable donne `missing`. Les métriques WHOOP indisponibles restent présentes avec `null` dans `wellness`.
+
+### DELETE `/resetDailyWellnessWhoop`
+
+```bash
+curl --fail --silent --show-error \
+  -X DELETE \
+  -H "Authorization: Bearer $HOME_ASSISTANT_WELLNESS_ENDPOINT_TOKEN" \
+  "https://<function-url>/resetDailyWellnessWhoop?account=me"
+
+curl --fail --silent --show-error \
+  -X DELETE \
+  -H "Authorization: Bearer $HOME_ASSISTANT_WELLNESS_ENDPOINT_TOKEN" \
+  "https://<function-url>/resetDailyWellnessWhoop?account=partner"
+```
+
+Le reset invalide seulement le cache WHOOP demandé. Il ne déconnecte pas WHOOP, ne supprime pas les tokens OAuth, ne touche ni l'autre compte ni le cache Intervals; le GET WHOOP suivant relit l'API.
+
+Déployer uniquement cette intégration quand les secrets et l'URI sont configurés :
+
+```bash
+firebase deploy --only functions:getDailyWellnessWhoop,functions:resetDailyWellnessWhoop,functions:whoopAuth,functions:whoopCallback
+```
 
 ## Commandes disponibles
 
