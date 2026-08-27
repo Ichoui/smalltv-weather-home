@@ -19,6 +19,7 @@ import {
 import { mapWeatherStateForHomeAssistant } from "./services/home-assistant-weather.js";
 import { getWeatherState, refreshWeatherState } from "./services/weather.js";
 import { completeWhoopAuthorization, createWhoopAuthorization } from "./services/whoop-oauth.js";
+import { getDailyJokeState, selectDailyJoke as selectDailyJokeForDate } from "./services/daily-jokes.js";
 import type { WhoopOAuthCredentials } from "./whoop/client.js";
 
 initializeApp();
@@ -29,6 +30,7 @@ const INTERVALS_API_KEY_PARTNER = defineSecret("INTERVALS_API_KEY_PARTNER");
 const HOME_ASSISTANT_WELLNESS_ENDPOINT_TOKEN = defineSecret("HOME_ASSISTANT_WELLNESS_ENDPOINT_TOKEN");
 const WHOOP_CLIENT_ID = defineSecret("WHOOP_CLIENT_ID");
 const WHOOP_CLIENT_SECRET = defineSecret("WHOOP_CLIENT_SECRET");
+const BLAGUES_API_TOKEN = defineSecret("BLAGUES_API_TOKEN");
 const WELLNESS_TIMEZONE = defineString("WELLNESS_TIMEZONE", { default: TIME_ZONE });
 const WHOOP_REDIRECT_URI = defineString("WHOOP_REDIRECT_URI");
 const FUNCTION_REGION = "northamerica-northeast1";
@@ -80,6 +82,23 @@ export const refreshWeather = onSchedule(
   },
 );
 
+export const selectDailyJoke = onSchedule(
+  {
+    schedule: "0 6 * * *",
+    timeZone: TIME_ZONE,
+    region: FUNCTION_REGION,
+    secrets: [BLAGUES_API_TOKEN],
+  },
+  async () => {
+    const date = currentDateInTimeZone(new Date(), TIME_ZONE);
+    await refreshDailyJokeForDate(date);
+  },
+);
+
+async function refreshDailyJokeForDate(date: string) {
+  return selectDailyJokeForDate(date, BLAGUES_API_TOKEN.value());
+}
+
 export const getWeather = onRequest(
   { region: FUNCTION_REGION, cors: true },
   async (_request, response) => {
@@ -113,6 +132,50 @@ export const getHomeAssistantWeather = onRequest(
     response
       .set("Cache-Control", "private, max-age=300")
       .json(mapWeatherStateForHomeAssistant(state));
+  },
+);
+
+export const getHomeAssistantDailyJoke = onRequest(
+  { region: FUNCTION_REGION, secrets: [HOME_ASSISTANT_WELLNESS_ENDPOINT_TOKEN] },
+  async (request, response) => {
+    if (!isAuthorized(request.get("authorization"), HOME_ASSISTANT_WELLNESS_ENDPOINT_TOKEN.value())) {
+      response.status(401).json({ error: "Unauthorized" });
+      return;
+    }
+    if (request.method !== "GET") {
+      response.set("Allow", "GET").status(405).json({ error: "Method Not Allowed" });
+      return;
+    }
+
+    const date = currentDateInTimeZone(new Date(), TIME_ZONE);
+    const state = await getDailyJokeState(date);
+    response.set("Cache-Control", "private, no-store").status(200).json(state);
+  },
+);
+
+export const refreshHomeAssistantDailyJoke = onRequest(
+  {
+    region: FUNCTION_REGION,
+    secrets: [HOME_ASSISTANT_WELLNESS_ENDPOINT_TOKEN, BLAGUES_API_TOKEN],
+  },
+  async (request, response) => {
+    if (!isAuthorized(request.get("authorization"), HOME_ASSISTANT_WELLNESS_ENDPOINT_TOKEN.value())) {
+      response.status(401).json({ error: "Unauthorized" });
+      return;
+    }
+    if (request.method !== "POST") {
+      response.set("Allow", "POST").status(405).json({ error: "Method Not Allowed" });
+      return;
+    }
+
+    try {
+      const date = currentDateInTimeZone(new Date(), TIME_ZONE);
+      const state = await refreshDailyJokeForDate(date);
+      response.set("Cache-Control", "private, no-store").status(200).json(state);
+    } catch {
+      logger.error("Manual daily joke refresh failed");
+      response.status(500).json({ error: "Internal Server Error" });
+    }
   },
 );
 
