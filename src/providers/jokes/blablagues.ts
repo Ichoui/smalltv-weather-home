@@ -2,8 +2,7 @@ import { contentHashFor, normalizeJokeText, type JokeCandidate } from "../../dom
 import { fetchJsonWithRetries } from "./http.js";
 
 const REQUESTED_EXCLUSIONS = [
-  "star+wars", "monsieur+et+madame", "melon+et+meleche", "toto", "lada",
-  "devinettes", "chfyhfyf", "carambar", "amour", "histoires+droles",
+  "star+wars", "monsieur+et+madame", "melon+et+meleche", "toto", "lada", "chfyhfyf", "amour",
 ] as const;
 
 type BlablaguesCatalog = { blagues?: Record<string, unknown> };
@@ -45,9 +44,13 @@ export async function fetchBlablaguesJoke(): Promise<JokeCandidate | null> {
   if (data?.id_rubrique !== "blagues" || typeof data.id_categorie !== "string" || isExcludedCategory(data.id_categorie)) return null;
   if (typeof data.categorie !== "string") return null;
 
-  const lines = [content?.text_head, content?.text, content?.text_hidden]
+  const setupLines = [content?.text_head, content?.text]
     .filter((part): part is string => typeof part === "string" && part.trim().length > 0);
-  const text = lines.join("\n");
+  const setup = setupLines.join("\n");
+  const punchline = typeof content?.text_hidden === "string" && content.text_hidden.trim()
+    ? content.text_hidden
+    : null;
+  const text = [...setupLines, punchline].filter((part): part is string => part !== null).join("\n");
   if (!text) return null;
   const normalizedText = normalizeJokeText(text);
   const sourceId = typeof data.id === "string" || typeof data.id === "number"
@@ -57,6 +60,8 @@ export async function fetchBlablaguesJoke(): Promise<JokeCandidate | null> {
     source: "blablagues",
     sourceId,
     text,
+    setup: setup && punchline ? setup : null,
+    punchline: setup && punchline ? punchline : null,
     category: data.categorie,
     attribution: "Source : Blablagues.net",
     sourceUrl: typeof data.link === "string" ? data.link : null,

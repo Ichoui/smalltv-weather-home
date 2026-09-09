@@ -8,6 +8,8 @@ export type JokeCandidate = {
   source: JokeSource;
   sourceId: string;
   text: string;
+  setup: string | null;
+  punchline: string | null;
   category: string;
   attribution: string | null;
   sourceUrl: string | null;
@@ -25,6 +27,8 @@ export type DailyJokeState = {
   source: JokeSource | null;
   sourceId: string | null;
   category: string | null;
+  setup: string | null;
+  punchline: string | null;
   attribution: string | null;
   sourceUrl: string | null;
   selectedAt: string | null;
@@ -62,8 +66,13 @@ export function contentHashFor(normalizedText: string): string {
 }
 
 export function toStoredJoke(candidate: JokeCandidate): StoredJoke | null {
-  const normalizedText = normalizeJokeText(candidate.text);
-  if (!normalizedText || Array.from(normalizedText).length > 200) return null;
+  const normalizedSetup = candidate.setup === null ? null : normalizeJokeText(candidate.setup);
+  const normalizedPunchline = candidate.punchline === null ? null : normalizeJokeText(candidate.punchline);
+  const hasSplit = Boolean(normalizedSetup && normalizedPunchline);
+  const normalizedText = hasSplit
+    ? `${normalizedSetup}\n${normalizedPunchline}`
+    : normalizeJokeText(candidate.text);
+  if (!normalizedText || Array.from(normalizedText).length > 300) return null;
   const sourceId = candidate.sourceId.trim();
   const category = candidate.category.trim();
   if (!sourceId || !category) return null;
@@ -73,6 +82,8 @@ export function toStoredJoke(candidate: JokeCandidate): StoredJoke | null {
     sourceId,
     category,
     text: normalizedText,
+    setup: hasSplit ? normalizedSetup : null,
+    punchline: hasSplit ? normalizedPunchline : null,
     normalizedText,
     contentHash: contentHashFor(normalizedText),
   };
@@ -86,6 +97,8 @@ export function fallbackDailyJokeState(date: string, errorMessage: string): Dail
     source: null,
     sourceId: null,
     category: null,
+    setup: null,
+    punchline: null,
     attribution: null,
     sourceUrl: null,
     selectedAt: null,

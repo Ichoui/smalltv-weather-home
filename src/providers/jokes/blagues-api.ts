@@ -17,12 +17,14 @@ export async function fetchBlaguesApiJoke(token: string): Promise<JokeCandidate 
 
   if (typeof response.id !== "number" && typeof response.id !== "string") return null;
   if (typeof response.type !== "string" || response.type === "dev" || typeof response.joke !== "string") return null;
-  const answer = typeof response.answer === "string" && response.answer.trim() ? `\n${response.answer}` : "";
+  const answer = typeof response.answer === "string" && response.answer.trim() ? response.answer : null;
   const sourceId = String(response.id);
   return {
     source: "blagues-api",
     sourceId,
-    text: `${response.joke}${answer}`,
+    text: answer === null ? response.joke : `${response.joke}\n${answer}`,
+    setup: answer === null ? null : response.joke,
+    punchline: answer,
     category: response.type,
     attribution: null,
     sourceUrl: `https://www.blagues-api.fr/api/id/${encodeURIComponent(sourceId)}`,
